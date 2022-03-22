@@ -11,9 +11,9 @@
 
 int readVTK(const std::string &name,
             std::vector<Vec3> &points,
-            std::vector<ID2>&line,
-            std::vector<ID3>&triangles,
-            bool bigEndian=false) {
+            std::vector<ID2> &line,
+            std::vector<ID3> &triangles,
+            bool bigEndian = false) {
   std::vector<std::vector<std::vector<uint32_t>>> elements;
 
   //8种类别的元素，point，line，triangle，quad，tet，hex，prism，pyramid
@@ -131,7 +131,7 @@ int readVTK(const std::string &name,
 
   if (haveCells) {
     std::vector<std::vector<uint32_t> > cells(numElements);
-    for (auto &cell:cells) {
+    for (auto &cell : cells) {
       int num_vertices, n[100];
       if (binary) {
         if (fread(&num_vertices, sizeof(int), 1, fp) != 1) {
@@ -174,7 +174,7 @@ int readVTK(const std::string &name,
         fclose(fp);
         return 0;
       }
-      for (auto &i:cells) {
+      for (auto &i : cells) {
         int type;
         if (binary) {
           if (fread(&type, sizeof(int), 1, fp) != 1) {
@@ -227,7 +227,7 @@ int readVTK(const std::string &name,
         }
       }
     } else {
-      for (auto &cell:cells) {
+      for (auto &cell : cells) {
         int nbNodes = (int)cell.size();
         switch (nbNodes) {
           case 1: elements[0].push_back(cell);
@@ -272,19 +272,20 @@ int readVTK(const std::string &name,
     }
   }
 
-  for(auto l:elements[1]){
-    if(l.size()==2){
-      line.push_back({l[0],l[1]});
+  for (auto l : elements[1]) {
+    if (l.size() == 2) {
+      line.push_back({l[0], l[1]});
     }
   }
-  for(auto t:elements[2]){
-    if(t.size()==3){
-      triangles.push_back({t[0],t[1],t[2]});
+  for (auto t : elements[2]) {
+    if (t.size() == 3) {
+      triangles.push_back({t[0], t[1], t[2]});
     }
   }
   fclose(fp);
   return 1;
 }
+
 
 
 int main() {
@@ -294,17 +295,17 @@ int main() {
   std::string infile =
       "D:\\OneDrive\\model\\Mechanical\\vtk_raw_model\\TransmissionHousingFem.vtk";
 
-  readVTK(infile,points,lines,triangles);
-  std::vector<Vec3> edge_dir;
+  readVTK(infile, points, lines, triangles);
+  std::vector<Vec3> edge_dir;//边上的标架分量之一
   std::vector<ID3> singularities;
-
+  std::vector<std::array<double, 9>> global_triangle_dir;//三角形的三个点的标架分量之一
 
   BuildBackgroundMeshAndGuidingField(points,
                                      triangles,
                                      lines,
                                      edge_dir,
+                                     global_triangle_dir,
                                      singularities);
-
 
   return 0;
 }

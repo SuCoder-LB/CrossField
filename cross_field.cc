@@ -776,7 +776,17 @@ int computeCrossFieldWithHeatEquation(int N,
   }
   return true;
 }
+
+inline Vec3 crouzeix_raviart_interpolation(Vec3 lambda, Vec3 edge_values[3]) {
+  double x = lambda[1];
+  double y = lambda[2];
+  Vec3 shape = {1.0 - 2.0 * y, -1.0 + 2.0 * (x + y), 1.0 - 2.0 * x};
+  return shape[0] * edge_values[0] + shape[1] * edge_values[1]
+      + shape[2] * edge_values[2];
 }
+
+}
+
 int convertToPerTriangleCrossFieldDirections(
     int Ns,
     const std::vector<Vec3> &points,
@@ -800,6 +810,90 @@ int convertToPerTriangleCrossFieldDirections(
     Vec3 cross1 = tgt * cos(A) + tgt2 * sin(A);
     edgeDirections[l] = cross1;
   }
+  return 1;
+}
+
+int convertToPerTriangleCrossFieldDirections(
+    int Ns,
+    const std::vector<Vec3> &points,
+    const std::vector<ID3> &triangles,
+    const std::vector<Vec3> &triangles_normal,
+    const std::vector<std::array<double, 3> > &triEdgeTheta,
+    std::vector<std::array<double, 9> > &triangleDirections) {
+
+  triangleDirections.resize(triangles.size());
+
+  for (size_t f = 0; f < triangles.size(); ++f) {
+    auto t = triangles[f];
+
+    Vec3 N = triangles_normal[f];
+
+    /* Compute one branch at triangle vertices */
+    Vec3 refCross = {0., 0., 0.};
+    Vec3 avgCross = {0., 0., 0.};
+    Vec3 lifted_dirs[3];
+    for (size_t le = 0; le < 3; ++le) {
+      /* Get cross angle */
+      ID2 edge = {t[le], t[(le + 1) % 3]};
+      if (edge[0] > edge[1]) std::reverse(edge.begin(), edge.end());
+
+      double A = triEdgeTheta[f][le];
+
+      /* Local reference frame */
+      Vec3 tgt = points[edge[1]] - points[edge[0]];
+
+      if (Length(tgt) < 1.e-16) {
+        warn(__FILE__, __LINE__, "Edge (tri={},le={}), length = {}", f, le,
+             Length(tgt));
+        if (Length(tgt) == 0.) { return -1; }
+      }
+      Normalize(tgt);
+
+      Vec3 tgt2 = Cross(N, tgt);
+      Normalize(tgt2);
+
+      Vec3 cross1 = tgt * cos(A) + tgt2 * sin(A);
+      Normalize(cross1);
+
+      Vec3 cross2 = Cross(N, cross1);
+      Normalize(cross2);
+
+      if (le == 0) {
+        refCross = cross1;
+        avgCross = avgCross + cross1;
+        lifted_dirs[le] = refCross;
+      } else {
+        Vec3 closest = {0., 0., 0.};
+        double dotmax = -DBL_MAX;
+        for (int k = 0; k < Ns; ++k) {
+          double agl = A + double(k) / double(Ns) * 2. * M_PI;
+          Vec3 candidate = tgt * cos(agl) + tgt2 * sin(agl);
+          Normalize(candidate);
+
+          if (Dot(candidate, refCross) > dotmax) {
+            closest = candidate;
+            dotmax = Dot(candidate, refCross);
+          }
+        }
+
+        lifted_dirs[le] = closest;
+        avgCross = avgCross + closest;
+      }
+    }
+    Vec3 vertex_dirs[3];
+    std::array<double, 9> tDirs;
+    for (size_t lv = 0; lv < 3; ++lv) {
+      Vec3 lambda = {0., 0., 0.};
+      lambda[lv] = 1.;
+      Vec3 dir = crouzeix_raviart_interpolation(lambda, lifted_dirs);
+      if (Length2(dir) != 0.) Normalize(dir);
+      for (size_t d = 0; d < 3; ++d) {
+        tDirs[3 * lv + d] = dir.data()[d];
+      }
+    }
+    triangleDirections[f] = tDirs;
+  }
+
   return 1;
 }
 
@@ -951,6 +1045,7 @@ int BuildBackgroundMeshAndGuidingField(const std::vector<Vec3> &points,
                                        const std::vector<ID3> &triangles,
                                        const std::vector<ID2> &lines,
                                        std::vector<Vec3> &global_edge_directions,
+                                       std::vector<std::array<double,9>> &global_triangle_directions,
                                        std::vector<ID3> &global_singularity_list) {
   constexpr int NBF = 3;
   vector<ID2> uIEdges;
@@ -1006,6 +1101,7 @@ int BuildBackgroundMeshAndGuidingField(const std::vector<Vec3> &points,
     Normalize(edgeNormal[i]);
   }
   vector<double> global_edge_theta(uIEdges.size(), 0);
+  vector<Vec3>global_triangle_theta(triangles.size());
   vector<vector<ID>> patches;
   SplitElement(faces, patches, border_line, old2IEdge, triangle_neighbors);
   for (int f = 0; f < (int)patches.size(); ++f) {
@@ -1037,6 +1133,7 @@ int BuildBackgroundMeshAndGuidingField(const std::vector<Vec3> &points,
       patch_normal[t] = triangle_normal[patches[f][t]];
     /* Cross field */
     std::vector<Vec3> triEdgeTheta;
+
     int nbDiffusionLevels = 4;
     double thresholdNormConvergence = 1.e-2;
     int verbosity = 0;
@@ -1066,6 +1163,7 @@ int BuildBackgroundMeshAndGuidingField(const std::vector<Vec3> &points,
            f);
     }
     for (int t = 0; t < (int)patches[f].size(); ++t) {
+      global_triangle_theta[patches[f][t]]=triEdgeTheta[t];
       for (int le = 0; le < 3; ++le) {
         global_edge_theta[old2IEdge[patches[f][t] * 3 + le]] =
             triEdgeTheta[t][le];
@@ -1087,7 +1185,7 @@ int BuildBackgroundMeshAndGuidingField(const std::vector<Vec3> &points,
     error(__FILE__,
           __LINE__,
           "- failed to compute Cross field singularities");
-  std::vector<std::array<double, 9> > triangleDirections;
+
   int sc = convertToPerTriangleCrossFieldDirections(
       4,
       points,
@@ -1096,7 +1194,15 @@ int BuildBackgroundMeshAndGuidingField(const std::vector<Vec3> &points,
       edgeNormal,
       global_edge_theta,
       global_edge_directions);
-//  //the code is present cross field
+
+  sc &= convertToPerTriangleCrossFieldDirections(4,
+                                                points,
+                                                triangles,
+                                                triangle_normal,
+                                                global_triangle_theta,
+                                                global_triangle_directions);
+
+  //  //the code is present cross field
 //  vector<Vec3>ps;
 //  vector<ID2>ls;
 //  for(int i=0;i<uIEdges.size();++i){
