@@ -1196,11 +1196,11 @@ int BuildBackgroundMeshAndGuidingField(const std::vector<Vec3> &points,
       global_edge_directions);
 
   sc &= convertToPerTriangleCrossFieldDirections(4,
-                                                points,
-                                                triangles,
-                                                triangle_normal,
-                                                global_triangle_theta,
-                                                global_triangle_directions);
+                                                 points,
+                                                 triangles,
+                                                 triangle_normal,
+                                                 global_triangle_theta,
+                                                 global_triangle_directions);
 
   //  //the code is present cross field
 //  vector<Vec3>ps;

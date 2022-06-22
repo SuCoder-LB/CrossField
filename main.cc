@@ -87,14 +87,14 @@ int readVTK(const std::string &name,
           fclose(fp);
           return 0;
         }
-        if (!bigEndian) SwapBytes((char *)f, sizeof(float), 3);
+        if (!bigEndian) SwapBytes((char *) f, sizeof(float), 3);
         for (int j = 0; j < 3; j++) xyz[j] = f[j];
       } else {
         if (fread(xyz, sizeof(double), 3, fp) != 3) {
           fclose(fp);
           return 0;
         }
-        if (!bigEndian) SwapBytes((char *)xyz, sizeof(double), 3);
+        if (!bigEndian) SwapBytes((char *) xyz, sizeof(double), 3);
       }
     } else {
       if (fscanf(fp, "%lf %lf %lf", &xyz[0], &xyz[1], &xyz[2]) != 3) {
@@ -138,12 +138,12 @@ int readVTK(const std::string &name,
           fclose(fp);
           return 0;
         }
-        if (!bigEndian) SwapBytes((char *)&num_vertices, sizeof(int), 1);
-        if ((int)fread(n, sizeof(int), num_vertices, fp) != num_vertices) {
+        if (!bigEndian) SwapBytes((char *) &num_vertices, sizeof(int), 1);
+        if ((int) fread(n, sizeof(int), num_vertices, fp) != num_vertices) {
           fclose(fp);
           return 0;
         }
-        if (!bigEndian) SwapBytes((char *)n, sizeof(int), num_vertices);
+        if (!bigEndian) SwapBytes((char *) n, sizeof(int), num_vertices);
       } else {
         if (fscanf(fp, "%d", &num_vertices) != 1) {
           fclose(fp);
@@ -157,7 +157,7 @@ int readVTK(const std::string &name,
         }
       }
       for (int j = 0; j < num_vertices; j++) {
-        if (n[j] >= 0 && n[j] < (int)vertices.size())
+        if (n[j] >= 0 && n[j] < (int) vertices.size())
           cell.push_back(n[j]);
         else
           fprintf(stdout, "Wrong node index %d\n", n[j]);
@@ -169,7 +169,7 @@ int readVTK(const std::string &name,
         fclose(fp);
         return 0;
       }
-      if (strcmp(buffer, "CELL_TYPES") || numElements != (int)cells.size()) {
+      if (strcmp(buffer, "CELL_TYPES") || numElements != (int) cells.size()) {
         fprintf(stdout, "No or invalid number of cells types\n");
         fclose(fp);
         return 0;
@@ -181,7 +181,7 @@ int readVTK(const std::string &name,
             fclose(fp);
             return 0;
           }
-          if (!bigEndian) SwapBytes((char *)&type, sizeof(int), 1);
+          if (!bigEndian) SwapBytes((char *) &type, sizeof(int), 1);
         } else {
           if (fscanf(fp, "%d", &type) != 1) {
             fclose(fp);
@@ -228,7 +228,7 @@ int readVTK(const std::string &name,
       }
     } else {
       for (auto &cell : cells) {
-        int nbNodes = (int)cell.size();
+        int nbNodes = (int) cell.size();
         switch (nbNodes) {
           case 1: elements[0].push_back(cell);
             break;
@@ -257,12 +257,12 @@ int readVTK(const std::string &name,
           return 0;
         }
         strtol(line, &pEnd, 10);
-        v0 = (int)strtol(pEnd, &pEnd2, 10);
+        v0 = (int) strtol(pEnd, &pEnd2, 10);
         p = pEnd2;
         while (true) {
           v1 = strtol(p, &pEnd, 10);
           if (p == pEnd) break;
-          elements[1].push_back({(uint32_t)v0, (uint32_t)v1});
+          elements[1].push_back({(uint32_t) v0, (uint32_t) v1});
           p = pEnd;
           v0 = v1;
         }
@@ -286,7 +286,59 @@ int readVTK(const std::string &name,
   return 1;
 }
 
+bool VTKWriterVectorOnPoint(const std::string &meshName,
+                            const std::vector<Vec3> &points,
+                            const std::vector<ID3> &triangles,
+                            std::vector<std::array<double, 9>> &direction_on_triangle) {
+  FILE *fp = fopen(meshName.c_str(), "w");
+  if (!fp) {
+    fprintf(stdout, "Unable to open file '%s'\n", meshName.c_str());
+    return false;
+  }
 
+  // get the number of vertices and index the vertices in a continuous
+  // sequence
+  int numVertices = (int) points.size();
+
+  fprintf(fp, "# vtk DataFile Version 2.0\n");
+  fprintf(fp, "%s, Created by Su\n", SplitFileName(meshName)[1].c_str());
+  fprintf(fp, "ASCII\n");
+  fprintf(fp, "DATASET UNSTRUCTURED_GRID\n");
+
+  // write mesh vertices
+  fprintf(fp, "POINTS %d double\n", numVertices);
+  for (int i = 0; i < numVertices; i++)
+    fprintf(fp, "%.16g %.16g %.16g\n", points[i][0], points[i][1], points[i][2]);
+
+  // loop over all elements we need to save and count vertices
+
+  int numElements = (int) triangles.size(), totalNumInt = (int) triangles.size() * 4;
+  fprintf(fp, "CELLS %d %d\n", numElements, totalNumInt);
+  for (auto triangle : triangles)
+    fprintf(fp, "%d %ld %ld %ld\n", 3, triangle[0], triangle[1], triangle[2]);
+  fprintf(fp, "CELL_TYPES %d\n", numElements);
+  for (int i = 0; i < numElements; ++i) fprintf(fp, "5\n");
+
+  std::vector<Vec3> direction_on_point(numVertices);
+
+  for (int i = 0; i < triangles.size(); ++i) {
+    for (int j = 0; j < 3; ++j) {
+      direction_on_point[triangles[i][j]] =
+          {direction_on_triangle[i][j * 3], direction_on_triangle[i][j * 3 + 1], direction_on_triangle[i][j * 3 + 2]};
+    }
+  }
+
+  fprintf(fp, "POINT_DATA %d\n", numVertices);
+  fprintf(fp, "VECTORS vectors double\n");
+  //fprintf(fp, "LOOKUP_TABLE default\n");
+  for (int i = 0; i < numVertices; ++i) {
+    fprintf(fp, "%.12g %.12g %.12g\n", direction_on_point[i][0], direction_on_point[i][1], direction_on_point[i][2]);
+  }
+
+  fclose(fp);
+
+  return true;
+}
 
 int main() {
   std::vector<Vec3> points;
@@ -306,6 +358,8 @@ int main() {
                                      edge_dir,
                                      global_triangle_dir,
                                      singularities);
+
+  VTKWriterVectorOnPoint("TransmissionHousingFem_vector.vtk",points,triangles,global_triangle_dir);
 
   return 0;
 }
